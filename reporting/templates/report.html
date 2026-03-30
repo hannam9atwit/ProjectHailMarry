@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WiFi Pineapple Pentest Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #13161f;
+      --border:    #1f2535;
+      --accent:    #00e5ff;
+      --accent2:   #ff6b35;
+      --green:     #39ff14;
+      --red:       #ff3e3e;
+      --yellow:    #ffd600;
+      --text:      #c9d1e0;
+      --muted:     #5a6478;
+      --heading:   #e8eaf6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 0;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: linear-gradient(135deg, #0a0c10 0%, #0d1520 60%, #0f1a2e 100%);
+      border-bottom: 2px solid var(--accent);
+      padding: 40px 48px 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 300px; height: 300px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,229,255,0.06) 0%, transparent 70%);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .classification {
+      background: var(--accent2);
+      color: #fff;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      padding: 4px 12px;
+      border-radius: 2px;
+      text-transform: uppercase;
+    }
+    .report-id {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+    h1 {
+      color: var(--heading);
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-top: 20px;
+    }
+    h1 span { color: var(--accent); }
+    .subtitle {
+      color: var(--muted);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 2px;
+      margin-top: 6px;
+      text-transform: uppercase;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 28px;
+    }
+    .meta-item label {
+      display: block;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .meta-item span {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* ── LAYOUT ── */
+    .container { padding: 40px 48px; max-width: 1200px; }
+
+    /* ── STAT CARDS ── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px 16px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent);
+    }
+    .stat-card.danger::after  { background: var(--red); }
+    .stat-card.success::after { background: var(--green); }
+    .stat-card.warning::after { background: var(--yellow); }
+    .stat-value {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent);
+      display: block;
+      line-height: 1;
+    }
+    .stat-card.danger  .stat-value { color: var(--red); }
+    .stat-card.success .stat-value { color: var(--green); }
+    .stat-card.warning .stat-value { color: var(--yellow); }
+    .stat-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-top: 8px;
+      display: block;
+    }
+
+    /* ── SECTIONS ── */
+    .section { margin-bottom: 40px; }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-icon {
+      width: 28px; height: 28px;
+      background: rgba(0,229,255,0.1);
+      border: 1px solid rgba(0,229,255,0.3);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    h2 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--heading);
+    }
+    .section-count {
+      margin-left: auto;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--border);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* ── TABLES ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid rgba(31,37,53,0.6);
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: rgba(0,229,255,0.03); }
+    tbody td {
+      padding: 10px 14px;
+      color: var(--text);
+      vertical-align: middle;
+    }
+    .mono { font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+
+    /* ── BADGES ── */
+    .badge {
+      display: inline-block;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .badge-wpa2  { background: rgba(255,107,53,0.15); color: var(--accent2); border: 1px solid rgba(255,107,53,0.3); }
+    .badge-wpa   { background: rgba(255,214,0,0.12);  color: var(--yellow);  border: 1px solid rgba(255,214,0,0.3); }
+    .badge-open  { background: rgba(255,62,62,0.15);  color: var(--red);     border: 1px solid rgba(255,62,62,0.3); }
+    .badge-other { background: rgba(90,100,120,0.2);  color: var(--muted);   border: 1px solid var(--border); }
+    .badge-yes   { background: rgba(57,255,20,0.12);  color: var(--green);   border: 1px solid rgba(57,255,20,0.3); }
+    .badge-no    { background: rgba(255,62,62,0.12);  color: var(--red);     border: 1px solid rgba(255,62,62,0.3); }
+
+    /* ── HANDSHAKE RESULT ── */
+    .result-banner {
+      border-radius: 6px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .result-banner.found {
+      background: rgba(57,255,20,0.06);
+      border: 1px solid rgba(57,255,20,0.25);
+    }
+    .result-banner.not-found {
+      background: rgba(255,62,62,0.06);
+      border: 1px solid rgba(255,62,62,0.2);
+    }
+    .result-icon { font-size: 28px; }
+    .result-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--heading);
+    }
+    .result-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── LOG STATS ── */
+    .log-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .log-stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+    }
+    .log-stat-val {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 24px;
+      color: var(--accent);
+    }
+    .log-stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ── EMPTY STATE ── */
+    .empty {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+    }
+
+    /* ── FOOTER ── */
+    .footer {
+      margin-top: 60px;
+      padding: 24px 48px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer-left {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .disclaimer {
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 500px;
+      text-align: right;
+      line-height: 1.5;
+    }
+
+    /* ── PCAP TABLE ── */
+    .pcap-kv {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+    .kv-key {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .kv-val { font-weight: 600; color: var(--heading); }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ HEADER ══════════════════ -->
+<div class="header">
+  <div class="header-top">
+    <span class="classification">Confidential — Authorized Lab Use Only</span>
+    <span class="report-id">REPORT-{{ generated_at | replace(' ', 'T') | replace(':', '') }}</span>
+  </div>
+  <h1>WiFi <span>Pineapple</span> Penetration Test Report</h1>
+  <div class="subtitle">Python Automation Suite · COMP4500 Offensive Security</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <label>Generated</label>
+      <span>{{ generated_at }}</span>
+    </div>
+    <div class="meta-item">
+      <label>Tester</label>
+      <span>{{ tester }}</span>
+    </div>
+    <div class="meta-item">
+      <label>Scope</label>
+      <span>{{ target_scope }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ BODY ══════════════════ -->
+<div class="container">
+
+  <!-- STAT CARDS -->
+  <div class="stat-row">
+    <div class="stat-card">
+      <span class="stat-value">{{ network_count }}</span>
+      <span class="stat-label">Networks Found</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{{ client_count }}</span>
+      <span class="stat-label">Clients Detected</span>
+    </div>
+    <div class="stat-card {% if handshake_found %}success{% else %}danger{% endif %}">
+      <span class="stat-value">{{ eapol_count }}</span>
+      <span class="stat-label">EAPOL Frames</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{{ total_frames }}</span>
+      <span class="stat-label">Total Frames</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{{ unique_macs }}</span>
+      <span class="stat-label">Unique MACs</span>
+    </div>
+  </div>
+
+  <!-- NETWORKS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📡</div>
+      <h2>Detected Networks</h2>
+      <span class="section-count">{{ network_count }} found</span>
+    </div>
+    {% if networks %}
+    <table>
+      <thead>
+        <tr>
+          <th>SSID</th>
+          <th>BSSID</th>
+          <th>Channel</th>
+          <th>Signal (dBm)</th>
+          <th>Encryption</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for net in networks %}
+        <tr>
+          <td><strong>{{ net.ssid | default('(Hidden)') }}</strong></td>
+          <td class="mono">{{ net.bssid | default('—') }}</td>
+          <td class="mono">{{ net.channel | default('—') }}</td>
+          <td class="mono">{{ net.signal | default('—') }}</td>
+          <td>
+            {% set enc = net.encryption | default('') | upper %}
+            {% if 'WPA2' in enc %}
+              <span class="badge badge-wpa2">WPA2</span>
+            {% elif 'WPA' in enc %}
+              <span class="badge badge-wpa">WPA</span>
+            {% elif 'OPEN' in enc or enc == '' %}
+              <span class="badge badge-open">OPEN</span>
+            {% else %}
+              <span class="badge badge-other">{{ enc }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">// No networks captured — run recon module first</div>
+    {% endif %}
+  </div>
+
+  <!-- CLIENTS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">💻</div>
+      <h2>Detected Clients</h2>
+      <span class="section-count">{{ client_count }} found</span>
+    </div>
+    {% if clients %}
+    <table>
+      <thead>
+        <tr>
+          <th>Client MAC</th>
+          <th>Associated SSID</th>
+          <th>Signal (dBm)</th>
+          <th>Packets</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for client in clients %}
+        <tr>
+          <td class="mono">{{ client.mac | default('—') }}</td>
+          <td>{{ client.ssid | default('(Unassociated)') }}</td>
+          <td class="mono">{{ client.signal | default('—') }}</td>
+          <td class="mono">{{ client.packets | default('—') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">// No clients captured — run recon module first</div>
+    {% endif %}
+  </div>
+
+  <!-- HANDSHAKE RESULT -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">🤝</div>
+      <h2>WPA Handshake Captures</h2>
+      <span class="section-count">{{ capture_count }} file(s)</span>
+    </div>
+
+    {% if handshake_found %}
+    <div class="result-banner found">
+      <div class="result-icon">✅</div>
+      <div>
+        <div class="result-title">WPA Handshake Captured Successfully</div>
+        <div class="result-sub">{{ eapol_count }} EAPOL frame(s) extracted from pcap — 4-way handshake present</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="result-banner not-found">
+      <div class="result-icon">⚠️</div>
+      <div>
+        <div class="result-title">No Complete Handshake Detected</div>
+        <div class="result-sub">{{ eapol_count }} EAPOL frame(s) found — retry deauth or extend capture window</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if captures %}
+    <table>
+      <thead>
+        <tr>
+          <th>Filename</th>
+          <th>SSID</th>
+          <th>BSSID</th>
+          <th>Timestamp</th>
+          <th>Local Path</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cap in captures %}
+        <tr>
+          <td class="mono">{{ cap.filename }}</td>
+          <td>{{ cap.ssid | default('—') }}</td>
+          <td class="mono">{{ cap.bssid | default('—') }}</td>
+          <td class="mono">{{ cap.timestamp | default('—') }}</td>
+          <td class="mono" style="font-size:11px; color: var(--muted)">{{ cap.local_path }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">// No handshake .cap files downloaded</div>
+    {% endif %}
+  </div>
+
+  <!-- PCAP STATS -->
+  {% if pcap_stats %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📦</div>
+      <h2>Packet Capture Analysis</h2>
+    </div>
+    <div class="pcap-kv">
+      <div class="kv-row">
+        <span class="kv-key">Capture File</span>
+        <span class="kv-val mono" style="font-size:11px">{{ pcap_stats.file | default('—') }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">File Size</span>
+        <span class="kv-val">{{ pcap_stats.file_size_kb | default(0) }} KB</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Total Frames</span>
+        <span class="kv-val">{{ pcap_stats.total_frames | default(0) }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">EAPOL Frames</span>
+        <span class="kv-val">{{ pcap_stats.eapol_frames | default(0) }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Management Frames</span>
+        <span class="kv-val">{{ pcap_stats.mgmt_frames | default(0) }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Unique MACs</span>
+        <span class="kv-val">{{ pcap_stats.unique_macs | default(0) }}</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Handshake Detected</span>
+        <span class="kv-val">
+          {% if pcap_stats.handshake_found %}
+            <span class="badge badge-yes">YES</span>
+          {% else %}
+            <span class="badge badge-no">NO</span>
+          {% endif %}
+        </span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- LOG ANALYSIS -->
+  {% if log_stats %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📋</div>
+      <h2>Log Analysis Summary</h2>
+    </div>
+    <div class="log-grid">
+      <div class="log-stat">
+        <div class="log-stat-val">{{ log_stats.total | default(0) }}</div>
+        <div class="log-stat-label">Total Entries</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val" style="color: var(--red)">{{ log_stats.errors | default(0) }}</div>
+        <div class="log-stat-label">Errors</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val" style="color: var(--yellow)">{{ log_stats.warnings | default(0) }}</div>
+        <div class="log-stat-label">Warnings</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val">{{ log_stats.unique_macs | default(0) }}</div>
+        <div class="log-stat-label">Unique MACs in Logs</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ERRORS -->
+  {% if errors %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">🔴</div>
+      <h2>Errors &amp; Warnings</h2>
+      <span class="section-count">{{ errors | length }}</span>
+    </div>
+    <table>
+      <thead><tr><th>Message</th></tr></thead>
+      <tbody>
+        {% for err in errors %}
+        <tr><td class="mono" style="color: var(--red)">{{ err }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div><!-- /container -->
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-left">
+    COMP4500 · Python-Based Pineapple Automation Suite<br/>
+    Generated {{ generated_at }}
+  </div>
+  <div class="disclaimer">
+    This report was generated in a controlled lab environment for educational purposes only.
+    All testing was performed on authorized systems. No real-world networks or users were affected.
+  </div>
+</div>
+
+</body>
+</html>

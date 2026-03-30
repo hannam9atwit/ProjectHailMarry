@@ -1,0 +1,17 @@
+pineapple:
+  host: "172.16.42.1"
+  port: 1471
+  token: "REPLACE_WITH_YOUR_API_TOKEN"
+
+tshark:
+  binary_path: "/usr/bin/tshark"
+  capture_interface: "wlan1mon"
+  capture_duration: 30
+
+reporting:
+  output_dir: "./reports"
+  template_dir: "./reporting/templates"
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"

@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WiFi Pineapple Pentest Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #13161f;
+      --border:    #1f2535;
+      --accent:    #00e5ff;
+      --accent2:   #ff6b35;
+      --green:     #39ff14;
+      --red:       #ff3e3e;
+      --yellow:    #ffd600;
+      --text:      #c9d1e0;
+      --muted:     #5a6478;
+      --heading:   #e8eaf6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 0;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: linear-gradient(135deg, #0a0c10 0%, #0d1520 60%, #0f1a2e 100%);
+      border-bottom: 2px solid var(--accent);
+      padding: 40px 48px 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 300px; height: 300px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,229,255,0.06) 0%, transparent 70%);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .classification {
+      background: var(--accent2);
+      color: #fff;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      padding: 4px 12px;
+      border-radius: 2px;
+      text-transform: uppercase;
+    }
+    .report-id {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+    h1 {
+      color: var(--heading);
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-top: 20px;
+    }
+    h1 span { color: var(--accent); }
+    .subtitle {
+      color: var(--muted);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 2px;
+      margin-top: 6px;
+      text-transform: uppercase;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 28px;
+    }
+    .meta-item label {
+      display: block;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .meta-item span {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* ── LAYOUT ── */
+    .container { padding: 40px 48px; max-width: 1200px; }
+
+    /* ── STAT CARDS ── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px 16px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent);
+    }
+    .stat-card.danger::after  { background: var(--red); }
+    .stat-card.success::after { background: var(--green); }
+    .stat-card.warning::after { background: var(--yellow); }
+    .stat-value {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent);
+      display: block;
+      line-height: 1;
+    }
+    .stat-card.danger  .stat-value { color: var(--red); }
+    .stat-card.success .stat-value { color: var(--green); }
+    .stat-card.warning .stat-value { color: var(--yellow); }
+    .stat-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-top: 8px;
+      display: block;
+    }
+
+    /* ── SECTIONS ── */
+    .section { margin-bottom: 40px; }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-icon {
+      width: 28px; height: 28px;
+      background: rgba(0,229,255,0.1);
+      border: 1px solid rgba(0,229,255,0.3);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    h2 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--heading);
+    }
+    .section-count {
+      margin-left: auto;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--border);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* ── TABLES ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid rgba(31,37,53,0.6);
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: rgba(0,229,255,0.03); }
+    tbody td {
+      padding: 10px 14px;
+      color: var(--text);
+      vertical-align: middle;
+    }
+    .mono { font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+
+    /* ── BADGES ── */
+    .badge {
+      display: inline-block;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .badge-wpa2  { background: rgba(255,107,53,0.15); color: var(--accent2); border: 1px solid rgba(255,107,53,0.3); }
+    .badge-wpa   { background: rgba(255,214,0,0.12);  color: var(--yellow);  border: 1px solid rgba(255,214,0,0.3); }
+    .badge-open  { background: rgba(255,62,62,0.15);  color: var(--red);     border: 1px solid rgba(255,62,62,0.3); }
+    .badge-other { background: rgba(90,100,120,0.2);  color: var(--muted);   border: 1px solid var(--border); }
+    .badge-yes   { background: rgba(57,255,20,0.12);  color: var(--green);   border: 1px solid rgba(57,255,20,0.3); }
+    .badge-no    { background: rgba(255,62,62,0.12);  color: var(--red);     border: 1px solid rgba(255,62,62,0.3); }
+
+    /* ── HANDSHAKE RESULT ── */
+    .result-banner {
+      border-radius: 6px;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .result-banner.found {
+      background: rgba(57,255,20,0.06);
+      border: 1px solid rgba(57,255,20,0.25);
+    }
+    .result-banner.not-found {
+      background: rgba(255,62,62,0.06);
+      border: 1px solid rgba(255,62,62,0.2);
+    }
+    .result-icon { font-size: 28px; }
+    .result-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--heading);
+    }
+    .result-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── LOG STATS ── */
+    .log-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .log-stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+    }
+    .log-stat-val {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 24px;
+      color: var(--accent);
+    }
+    .log-stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ── EMPTY STATE ── */
+    .empty {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+    }
+
+    /* ── FOOTER ── */
+    .footer {
+      margin-top: 60px;
+      padding: 24px 48px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer-left {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .disclaimer {
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 500px;
+      text-align: right;
+      line-height: 1.5;
+    }
+
+    /* ── PCAP TABLE ── */
+    .pcap-kv {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+    .kv-key {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .kv-val { font-weight: 600; color: var(--heading); }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ HEADER ══════════════════ -->
+<div class="header">
+  <div class="header-top">
+    <span class="classification">Confidential — Authorized Lab Use Only</span>
+    <span class="report-id">REPORT-2026-03-30T210050</span>
+  </div>
+  <h1>WiFi <span>Pineapple</span> Penetration Test Report</h1>
+  <div class="subtitle">Python Automation Suite · COMP4500 Offensive Security</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <label>Generated</label>
+      <span>2026-03-30 21:00:50</span>
+    </div>
+    <div class="meta-item">
+      <label>Tester</label>
+      <span>Mock Student / Lab Test</span>
+    </div>
+    <div class="meta-item">
+      <label>Scope</label>
+      <span>Simulated Lab Environment (No real devices)</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ BODY ══════════════════ -->
+<div class="container">
+
+  <!-- STAT CARDS -->
+  <div class="stat-row">
+    <div class="stat-card">
+      <span class="stat-value">6</span>
+      <span class="stat-label">Networks Found</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">5</span>
+      <span class="stat-label">Clients Detected</span>
+    </div>
+    <div class="stat-card success">
+      <span class="stat-value">4</span>
+      <span class="stat-label">EAPOL Frames</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">512</span>
+      <span class="stat-label">Total Frames</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">8</span>
+      <span class="stat-label">Unique MACs</span>
+    </div>
+  </div>
+
+  <!-- NETWORKS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📡</div>
+      <h2>Detected Networks</h2>
+      <span class="section-count">6 found</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>SSID</th>
+          <th>BSSID</th>
+          <th>Channel</th>
+          <th>Signal (dBm)</th>
+          <th>Encryption</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td><strong>LabRouter_2G</strong></td>
+          <td class="mono">AA:BB:CC:DD:EE:01</td>
+          <td class="mono">6</td>
+          <td class="mono">-42</td>
+          <td>
+
+
+              <span class="badge badge-wpa2">WPA2</span>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>LabRouter_5G</strong></td>
+          <td class="mono">AA:BB:CC:DD:EE:02</td>
+          <td class="mono">36</td>
+          <td class="mono">-55</td>
+          <td>
+
+
+              <span class="badge badge-wpa2">WPA2</span>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>NETGEAR_GUEST</strong></td>
+          <td class="mono">11:22:33:44:55:01</td>
+          <td class="mono">1</td>
+          <td class="mono">-68</td>
+          <td>
+
+
+              <span class="badge badge-open">OPEN</span>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>ATT-WIFI-3F92</strong></td>
+          <td class="mono">11:22:33:44:55:02</td>
+          <td class="mono">11</td>
+          <td class="mono">-74</td>
+          <td>
+
+
+              <span class="badge badge-wpa2">WPA2</span>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>xfinitywifi</strong></td>
+          <td class="mono">DE:AD:BE:EF:00:01</td>
+          <td class="mono">6</td>
+          <td class="mono">-80</td>
+          <td>
+
+
+              <span class="badge badge-open">OPEN</span>
+
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>DIRECT-Printer</strong></td>
+          <td class="mono">DE:AD:BE:EF:00:02</td>
+          <td class="mono">1</td>
+          <td class="mono">-77</td>
+          <td>
+
+
+              <span class="badge badge-wpa2">WPA2</span>
+
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- CLIENTS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">💻</div>
+      <h2>Detected Clients</h2>
+      <span class="section-count">5 found</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Client MAC</th>
+          <th>Associated SSID</th>
+          <th>Signal (dBm)</th>
+          <th>Packets</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td class="mono">C0:FF:EE:00:00:01</td>
+          <td>LabRouter_2G</td>
+          <td class="mono">-38</td>
+          <td class="mono">1420</td>
+        </tr>
+
+        <tr>
+          <td class="mono">C0:FF:EE:00:00:02</td>
+          <td>LabRouter_2G</td>
+          <td class="mono">-51</td>
+          <td class="mono">302</td>
+        </tr>
+
+        <tr>
+          <td class="mono">C0:FF:EE:00:00:03</td>
+          <td>LabRouter_5G</td>
+          <td class="mono">-60</td>
+          <td class="mono">88</td>
+        </tr>
+
+        <tr>
+          <td class="mono">C0:FF:EE:00:00:04</td>
+          <td>xfinitywifi</td>
+          <td class="mono">-79</td>
+          <td class="mono">14</td>
+        </tr>
+
+        <tr>
+          <td class="mono">C0:FF:EE:00:00:05</td>
+          <td>None</td>
+          <td class="mono">-85</td>
+          <td class="mono">6</td>
+        </tr>
+
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- HANDSHAKE RESULT -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">🤝</div>
+      <h2>WPA Handshake Captures</h2>
+      <span class="section-count">1 file(s)</span>
+    </div>
+
+
+    <div class="result-banner found">
+      <div class="result-icon">✅</div>
+      <div>
+        <div class="result-title">WPA Handshake Captured Successfully</div>
+        <div class="result-sub">4 EAPOL frame(s) extracted from pcap — 4-way handshake present</div>
+      </div>
+    </div>
+
+
+
+    <table>
+      <thead>
+        <tr>
+          <th>Filename</th>
+          <th>SSID</th>
+          <th>BSSID</th>
+          <th>Timestamp</th>
+          <th>Local Path</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td class="mono">LabRouter_2G_handshake.cap</td>
+          <td>LabRouter_2G</td>
+          <td class="mono">AA:BB:CC:DD:EE:01</td>
+          <td class="mono">2026-03-30 21:00:50</td>
+          <td class="mono" style="font-size:11px; color: var(--muted)">./captures/LabRouter_2G_handshake.cap</td>
+        </tr>
+
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- PCAP STATS -->
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📦</div>
+      <h2>Packet Capture Analysis</h2>
+    </div>
+    <div class="pcap-kv">
+      <div class="kv-row">
+        <span class="kv-key">Capture File</span>
+        <span class="kv-val mono" style="font-size:11px">./captures/LabRouter_2G_handshake.cap</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">File Size</span>
+        <span class="kv-val">87.4 KB</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Total Frames</span>
+        <span class="kv-val">512</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">EAPOL Frames</span>
+        <span class="kv-val">4</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Management Frames</span>
+        <span class="kv-val">134</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Unique MACs</span>
+        <span class="kv-val">8</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Handshake Detected</span>
+        <span class="kv-val">
+
+            <span class="badge badge-yes">YES</span>
+
+        </span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- LOG ANALYSIS -->
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">📋</div>
+      <h2>Log Analysis Summary</h2>
+    </div>
+    <div class="log-grid">
+      <div class="log-stat">
+        <div class="log-stat-val">16</div>
+        <div class="log-stat-label">Total Entries</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val" style="color: var(--red)">1</div>
+        <div class="log-stat-label">Errors</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val" style="color: var(--yellow)">2</div>
+        <div class="log-stat-label">Warnings</div>
+      </div>
+      <div class="log-stat">
+        <div class="log-stat-val">4</div>
+        <div class="log-stat-label">Unique MACs in Logs</div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ERRORS -->
+
+
+</div><!-- /container -->
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-left">
+    COMP4500 · Python-Based Pineapple Automation Suite<br/>
+    Generated 2026-03-30 21:00:50
+  </div>
+  <div class="disclaimer">
+    This report was generated in a controlled lab environment for educational purposes only.
+    All testing was performed on authorized systems. No real-world networks or users were affected.
+  </div>
+</div>
+
+</body>
+</html>

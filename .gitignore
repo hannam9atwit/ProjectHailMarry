@@ -1,0 +1,21 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Never commit real config with API token
+config.yaml
+
+# Captured data - keep out of repo
+logs/*.log
+logs/*.json
+captures/*.pcap
+captures/*.cap
+reports/*.html
+reports/*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
