@@ -1,5 +1,7 @@
 """
-Main for the Python-Based Pineapple Automation Suite.
+main.py
+-------
+Main orchestrator for the Python-Based Pineapple Automation Suite.
 
 Ties together all modules into a single scriptable, reproducible workflow:
   1. Load config + set up logging
@@ -76,6 +78,14 @@ def parse_args():
         "--scope", default="Lab Environment (Authorized)",
         help="Scope description for the report header"
     )
+    parser.add_argument(
+        "--download-all", action="store_true",
+        help=(
+            "If deauth fails or no new captures appear, also download "
+            "existing captures on the device that match the target BSSID. "
+            "Use this when the API deauth endpoint is unavailable."
+        )
+    )
     return parser.parse_args()
 
 
@@ -83,7 +93,10 @@ def verify_connection(client: PineappleClient, logger) -> bool:
     """Ping the Pineapple API and confirm it's reachable."""
     try:
         info = client.get_info()
-        logger.info(f"Pineapple connected — device type: {info.get('device', 'unknown')}")
+        logger.info(
+            f"Pineapple connected — firmware: {info.get('firmware', 'unknown')}, "
+            f"hostname: {info.get('hostname', 'unknown')}"
+        )
         return True
     except PineappleAPIError as e:
         logger.error(f"Cannot connect to Pineapple: {e}")
@@ -124,6 +137,7 @@ def run_handshake(client: PineappleClient, cfg, args, logger) -> dict:
         client_mac=args.client_mac,
         capture_dir="./captures",
         poll_wait=cfg.tshark.capture_duration,
+        download_all=args.download_all,
         log_dir=cfg.logging.log_dir,
     )
     hs.run()
