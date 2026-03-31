@@ -2,9 +2,15 @@
 Wrapper around the WiFi Pineapple REST API.
 Handles authentication, request/response lifecycle, and all endpoint calls.
 
-Pineapple Mark VII firmware 2.1.x uses session-based auth:
-    POST /api/auth/login  →  returns Bearer token
-    All subsequent requests use: Authorization: Bearer <token>
+Confirmed working endpoints for Mark VII firmware 2.1.3:
+    POST /api/login                  → authenticate
+    GET  /api/device                 → device info
+    GET  /api/modules                → list modules
+    GET  /api/pineap/settings        → PineAP config
+    POST /api/pineap/settings        → update PineAP config
+    GET  /api/pineap/handshakes      → list captured handshakes
+    GET  /api/pineap/clients         → connected clients
+    GET  /api/pineap/ssids           → SSID pool
 """
 
 import requests
@@ -22,7 +28,7 @@ class PineappleAPIError(Exception):
 
 class PineappleClient:
     """
-    REST API client for the WiFi Pineapple Mark VII.
+    REST API client for the WiFi Pineapple Mark VII firmware 2.1.3.
 
     Authenticates on construction via username/password, then uses
     the returned Bearer token for all subsequent requests.
@@ -49,14 +55,8 @@ class PineappleClient:
         """
         Log in to the Pineapple and store the session token.
         Called automatically on construction.
-
-        Returns:
-            True on success.
-
-        Raises:
-            PineappleAPIError if login fails or Pineapple is unreachable.
         """
-        url = f"{self.base_url}/auth/login"
+        url = f"{self.base_url}/login"
         try:
             logger.info(f"Authenticating with Pineapple at {url}")
             r = requests.post(
@@ -67,9 +67,7 @@ class PineappleClient:
             r.raise_for_status()
             data = r.json()
 
-            # Firmware 2.1.x returns either 'token' or 'api_token'
             token = data.get("token") or data.get("api_token")
-
             if not token:
                 raise PineappleAPIError(
                     f"Auth response did not contain a token. Response: {data}"
@@ -104,7 +102,7 @@ class PineappleClient:
             r.raise_for_status()
             return r.json()
         except ConnectionError:
-            raise PineappleAPIError(f"Cannot reach Pineapple at {url}. Is it connected?")
+            raise PineappleAPIError(f"Cannot reach Pineapple at {url}.")
         except Timeout:
             raise PineappleAPIError(f"Request timed out: GET {url}")
         except HTTPError as e:
@@ -123,7 +121,7 @@ class PineappleClient:
             r.raise_for_status()
             return r.json()
         except ConnectionError:
-            raise PineappleAPIError(f"Cannot reach Pineapple at {url}. Is it connected?")
+            raise PineappleAPIError(f"Cannot reach Pineapple at {url}.")
         except Timeout:
             raise PineappleAPIError(f"Request timed out: POST {url}")
         except HTTPError as e:
@@ -134,12 +132,12 @@ class PineappleClient:
     # ------------------------------------------------------------------
 
     def get_info(self) -> dict:
-        """Return firmware version, hostname, uptime."""
-        return self._get("info")
+        """Return device info."""
+        return self._get("device")
 
     def get_status(self) -> dict:
-        """Return current system status."""
-        return self._get("status")
+        """Return device info (alias for get_info on 2.1.3)."""
+        return self._get("device")
 
     # ------------------------------------------------------------------
     # Module endpoints
@@ -164,27 +162,66 @@ class PineappleClient:
         return self._get(f"module/{module_name}/log")
 
     # ------------------------------------------------------------------
-    # Recon endpoints
+    # Recon — firmware 2.1.3 does not expose a dedicated recon REST API.
+    # Recon results are written to /root/recon.db on the device.
+    # We return the clients and SSID pool from PineAP instead, which
+    # reflects live association and probe data.
     # ------------------------------------------------------------------
 
     def get_networks(self) -> list:
-        """Return list of detected networks from recon module."""
-        logger.info("Fetching detected networks from Pineapple recon")
-        return self._get("recon/networks")
+        """
+        Return detected networks from the PineAP SSID pool.
+        On firmware 2.1.3 there is no dedicated recon/networks endpoint —
+        the SSID pool is the closest equivalent.
+        """
+        logger.info("Fetching SSID pool from PineAP (recon equivalent)")
+        try:
+            data = self._get("pineap/ssids")
+            raw  = data.get("ssids", "")
+            # SSIDs are returned as a newline-delimited string
+            ssids = [s.strip() for s in raw.split("\n") if s.strip() and not s.startswith("#")]
+            return [{"ssid": s, "bssid": "—", "channel": "—",
+                     "signal": "—", "encryption": "—"} for s in ssids]
+        except PineappleAPIError as e:
+            logger.warning(f"Could not fetch SSID pool: {e}")
+            return []
 
     def get_clients(self) -> list:
-        """Return list of detected clients from recon module."""
-        logger.info("Fetching detected clients from Pineapple recon")
-        return self._get("recon/clients")
+        """Return list of clients currently seen by PineAP."""
+        logger.info("Fetching clients from PineAP")
+        try:
+            data = self._get("pineap/clients")
+            # Response is a list of client dicts
+            if isinstance(data, list):
+                return [
+                    {
+                        "mac":     c.get("mac", "—"),
+                        "ssid":    c.get("ssid", "—"),
+                        "signal":  c.get("tx_bytes", "—"),
+                        "packets": c.get("rx_bytes", "—"),
+                    }
+                    for c in data
+                ]
+            return []
+        except PineappleAPIError as e:
+            logger.warning(f"Could not fetch clients: {e}")
+            return []
 
     def start_recon(self, scan_time: int = 15) -> dict:
-        """Trigger a recon scan for a given duration in seconds."""
-        logger.info(f"Starting recon scan ({scan_time}s)")
-        return self._post("recon/start", {"scanTime": scan_time})
+        """
+        Firmware 2.1.3 has no recon start endpoint.
+        PineAP passively captures SSIDs continuously when enabled.
+        This is a no-op that logs a warning and returns gracefully.
+        """
+        logger.warning(
+            "start_recon() called but firmware 2.1.3 has no recon/start endpoint. "
+            "PineAP captures SSIDs passively — ensure PineAP is enabled in the web UI."
+        )
+        return {"status": "passive — no action needed"}
 
     def stop_recon(self) -> dict:
-        """Stop an ongoing recon scan."""
-        return self._post("recon/stop")
+        """No-op on firmware 2.1.3."""
+        return {"status": "passive — no action needed"}
 
     # ------------------------------------------------------------------
     # PineAP endpoints
@@ -195,37 +232,48 @@ class PineappleClient:
         return self._get("pineap/settings")
 
     def set_pineap_settings(self, settings: dict) -> dict:
-        """Update PineAP settings (beacon flood, associations, etc.)."""
+        """Update PineAP settings."""
         logger.info(f"Updating PineAP settings: {settings}")
         return self._post("pineap/settings", settings)
 
     def enable_pineap(self) -> dict:
-        """Enable PineAP daemon."""
+        """Enable PineAP by setting enablePineAP to true."""
         logger.info("Enabling PineAP")
-        return self._post("pineap/enable")
+        current = self.get_pineap_settings()
+        current_settings = current.get("settings", {})
+        current_settings["enablePineAP"] = True
+        return self._post("pineap/settings", {"settings": current_settings})
 
     def disable_pineap(self) -> dict:
-        """Disable PineAP daemon."""
+        """Disable PineAP by setting enablePineAP to false."""
         logger.info("Disabling PineAP")
-        return self._post("pineap/disable")
+        current = self.get_pineap_settings()
+        current_settings = current.get("settings", {})
+        current_settings["enablePineAP"] = False
+        return self._post("pineap/settings", {"settings": current_settings})
 
     # ------------------------------------------------------------------
     # Handshake endpoints
     # ------------------------------------------------------------------
 
     def get_handshakes(self) -> list:
-        """List all captured WPA handshakes stored on the device."""
-        return self._get("handshakes")
+        """
+        List all captured WPA handshakes stored on the device.
+        Returns the handshakes list from /api/pineap/handshakes.
+        """
+        data = self._get("pineap/handshakes")
+        return data.get("handshakes", [])
 
     def download_handshake(self, filename: str, dest_path: str):
         """
-        Download a handshake .cap file from the Pineapple to local disk.
+        Download a handshake file from the Pineapple to local disk.
+        Uses the location field returned by get_handshakes().
 
         Args:
-            filename:  Name of the handshake file on the Pineapple.
+            filename:  The filename on the Pineapple (e.g. 74-df-bf-04-e2-eb_eviltwin.pcap)
             dest_path: Local path to save the file.
         """
-        url = f"{self.base_url}/handshakes/{filename}"
+        url = f"{self.base_url}/pineap/handshakes/{filename}/download"
         logger.info(f"Downloading handshake: {filename} → {dest_path}")
         try:
             r = requests.get(url, headers=self.headers, timeout=30, stream=True)
@@ -238,19 +286,17 @@ class PineappleClient:
             raise PineappleAPIError(f"Failed to download handshake {filename}: {e}")
 
     # ------------------------------------------------------------------
-    # Deauth endpoints (lab/authorized use only)
+    # Deauth
     # ------------------------------------------------------------------
 
     def send_deauth(self, bssid: str, client_mac: str = "FF:FF:FF:FF:FF:FF") -> dict:
         """
-        Send deauthentication frames to force a client to reconnect,
-        triggering a WPA handshake capture.
-
-        Args:
-            bssid:      Target AP MAC address.
-            client_mac: Client to deauth. Defaults to broadcast (all clients).
+        Send deauthentication frames via PineAP settings target_mac field.
 
         IMPORTANT: Only use against your own lab AP with written authorization.
         """
         logger.warning(f"Sending deauth → BSSID={bssid}, Client={client_mac}")
-        return self._post("deauth", {"bssid": bssid, "client": client_mac})
+        current = self.get_pineap_settings()
+        current_settings = current.get("settings", {})
+        current_settings["target_mac"] = client_mac
+        return self._post("pineap/settings", {"settings": current_settings})

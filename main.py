@@ -83,10 +83,7 @@ def verify_connection(client: PineappleClient, logger) -> bool:
     """Ping the Pineapple API and confirm it's reachable."""
     try:
         info = client.get_info()
-        logger.info(
-            f"Pineapple connected — firmware: {info.get('firmware', 'unknown')}, "
-            f"hostname: {info.get('hostname', 'unknown')}"
-        )
+        logger.info(f"Pineapple connected — device type: {info.get('device', 'unknown')}")
         return True
     except PineappleAPIError as e:
         logger.error(f"Cannot connect to Pineapple: {e}")
