@@ -1,7 +1,8 @@
 pineapple:
   host: "172.16.42.1"
   port: 1471
-  token: "REPLACE_WITH_YOUR_API_TOKEN"
+  username: "root"
+  password: "root"
 
 tshark:
   binary_path: "/usr/bin/tshark"

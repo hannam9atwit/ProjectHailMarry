@@ -2,8 +2,9 @@
 Wrapper around the WiFi Pineapple REST API.
 Handles authentication, request/response lifecycle, and all endpoint calls.
 
-Pineapple API uses Bearer token auth on:
-    http://<host>:<port>/api/<endpoint>
+Pineapple Mark VII firmware 2.1.x uses session-based auth:
+    POST /api/auth/login  →  returns Bearer token
+    All subsequent requests use: Authorization: Bearer <token>
 """
 
 import requests
@@ -21,7 +22,10 @@ class PineappleAPIError(Exception):
 
 class PineappleClient:
     """
-    REST API client for the WiFi Pineapple.
+    REST API client for the WiFi Pineapple Mark VII.
+
+    Authenticates on construction via username/password, then uses
+    the returned Bearer token for all subsequent requests.
 
     All methods return parsed JSON as Python dicts/lists.
     Raises PineappleAPIError on any network or HTTP failure.
@@ -29,12 +33,64 @@ class PineappleClient:
 
     def __init__(self, config: PineappleConfig):
         self.base_url = f"http://{config.host}:{config.port}/api"
-        self.headers = {
-            "Authorization": f"Bearer {config.token}",
-            "Content-Type": "application/json",
-        }
-        self.timeout = 10
+        self.username = config.username
+        self.password = config.password
+        self.token    = None
+        self.headers  = {"Content-Type": "application/json"}
+        self.timeout  = 10
         logger.info(f"PineappleClient initialized → {self.base_url}")
+        self.authenticate()
+
+    # ------------------------------------------------------------------
+    # Authentication
+    # ------------------------------------------------------------------
+
+    def authenticate(self) -> bool:
+        """
+        Log in to the Pineapple and store the session token.
+        Called automatically on construction.
+
+        Returns:
+            True on success.
+
+        Raises:
+            PineappleAPIError if login fails or Pineapple is unreachable.
+        """
+        url = f"{self.base_url}/auth/login"
+        try:
+            logger.info(f"Authenticating with Pineapple at {url}")
+            r = requests.post(
+                url,
+                json={"username": self.username, "password": self.password},
+                timeout=self.timeout
+            )
+            r.raise_for_status()
+            data = r.json()
+
+            # Firmware 2.1.x returns either 'token' or 'api_token'
+            token = data.get("token") or data.get("api_token")
+
+            if not token:
+                raise PineappleAPIError(
+                    f"Auth response did not contain a token. Response: {data}"
+                )
+
+            self.token = token
+            self.headers["Authorization"] = f"Bearer {self.token}"
+            logger.info("Authenticated with Pineapple successfully")
+            return True
+
+        except ConnectionError:
+            raise PineappleAPIError(
+                f"Cannot reach Pineapple at {url}. "
+                "Is it powered on and is your Kali VM on the right network interface?"
+            )
+        except Timeout:
+            raise PineappleAPIError(f"Authentication timed out: {url}")
+        except HTTPError as e:
+            raise PineappleAPIError(
+                f"HTTP {r.status_code} during auth — wrong password? {e}"
+            )
 
     # ------------------------------------------------------------------
     # Internal HTTP helpers
@@ -58,7 +114,12 @@ class PineappleClient:
         url = f"{self.base_url}/{endpoint}"
         try:
             logger.debug(f"POST {url} | payload={data}")
-            r = requests.post(url, headers=self.headers, json=data or {}, timeout=self.timeout)
+            r = requests.post(
+                url,
+                headers=self.headers,
+                json=data or {},
+                timeout=self.timeout
+            )
             r.raise_for_status()
             return r.json()
         except ConnectionError:

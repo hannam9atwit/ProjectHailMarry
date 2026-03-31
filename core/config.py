@@ -4,14 +4,15 @@ Uses pydantic for strict type checking so bad configs fail fast with clear error
 """
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pathlib import Path
 
 
 class PineappleConfig(BaseModel):
     host: str = "172.16.42.1"
     port: int = 1471
-    token: str
+    username: str = "root"
+    password: str
 
 
 class TsharkConfig(BaseModel):
@@ -55,7 +56,7 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
     if not path.exists():
         raise FileNotFoundError(
             f"Config file not found: {config_path}\n"
-            "Copy config.example.yaml to config.yaml and fill in your token."
+            "Copy config.example.yaml to config.yaml and fill in your password."
         )
 
     with open(path) as f:

@@ -13,12 +13,22 @@ from core.config import PineappleConfig
 
 @pytest.fixture
 def config():
-    return PineappleConfig(host="172.16.42.1", port=1471, token="test-token-abc")
+    return PineappleConfig(
+        host="172.16.42.1",
+        port=1471,
+        username="root",
+        password="test-password"
+    )
 
 
 @pytest.fixture
 def client(config):
-    return PineappleClient(config)
+    """Build a PineappleClient with authentication mocked out."""
+    with patch.object(PineappleClient, "authenticate", return_value=True):
+        c = PineappleClient(config)
+        c.token = "test-token-abc"
+        c.headers["Authorization"] = "Bearer test-token-abc"
+        return c
 
 
 def make_mock_response(json_data, status_code=200):
@@ -30,13 +40,41 @@ def make_mock_response(json_data, status_code=200):
     return mock
 
 
+# ── Authentication tests ──────────────────────────────────────────────
+
+@patch("core.api_client.requests.post")
+def test_authenticate_success(mock_post, config):
+    mock_post.return_value = make_mock_response({"token": "abc123"})
+    with patch.object(PineappleClient, "authenticate", return_value=True):
+        c = PineappleClient(config)
+        c.token = "abc123"
+        c.headers["Authorization"] = "Bearer abc123"
+    assert c.token == "abc123"
+    assert c.headers["Authorization"] == "Bearer abc123"
+
+
+@patch("core.api_client.requests.post")
+def test_authenticate_no_token_raises(mock_post, config):
+    mock_post.return_value = make_mock_response({"success": False})
+    with pytest.raises(PineappleAPIError, match="token"):
+        PineappleClient(config)
+
+
+@patch("core.api_client.requests.post")
+def test_authenticate_connection_error_raises(mock_post, config):
+    from requests.exceptions import ConnectionError
+    mock_post.side_effect = ConnectionError("refused")
+    with pytest.raises(PineappleAPIError, match="Cannot reach Pineapple"):
+        PineappleClient(config)
+
+
 # ── GET tests ─────────────────────────────────────────────────────────
 
 @patch("core.api_client.requests.get")
 def test_get_info(mock_get, client):
-    mock_get.return_value = make_mock_response({"firmware": "2.1.0", "hostname": "Pineapple"})
+    mock_get.return_value = make_mock_response({"firmware": "2.1.3", "hostname": "Pineapple"})
     result = client.get_info()
-    assert result["firmware"] == "2.1.0"
+    assert result["firmware"] == "2.1.3"
     assert result["hostname"] == "Pineapple"
 
 
@@ -92,7 +130,6 @@ def test_start_recon(mock_post, client):
     mock_post.return_value = make_mock_response({"status": "scanning"})
     result = client.start_recon(scan_time=10)
     assert result["status"] == "scanning"
-    # Verify scanTime was sent in the payload
     call_kwargs = mock_post.call_args
     assert call_kwargs.kwargs["json"]["scanTime"] == 10
 
@@ -121,7 +158,5 @@ def test_timeout_raises_api_error(mock_get, client):
 def test_bearer_token_sent_in_header(mock_get, client):
     mock_get.return_value = make_mock_response({})
     client.get_info()
-    call_kwargs = mock_get.call_args
-    headers = call_kwargs.kwargs.get("headers") or call_kwargs.args[1] if len(call_kwargs.args) > 1 else {}
     assert "Authorization" in client.headers
     assert client.headers["Authorization"] == "Bearer test-token-abc"
