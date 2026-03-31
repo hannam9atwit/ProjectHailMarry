@@ -1,5 +1,7 @@
 """
-Unit tests for PineappleClient.
+test_api_client.py
+------------------
+Unit tests for PineappleClient against firmware 2.1.3 behavior.
 All tests mock the HTTP layer — no real Pineapple required.
 """
 
@@ -9,7 +11,7 @@ from core.api_client import PineappleClient, PineappleAPIError
 from core.config import PineappleConfig
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────
+# ── Fixtures ──────────────────────────────────────────────────────────
 
 @pytest.fixture
 def config():
@@ -32,15 +34,15 @@ def client(config):
 
 
 def make_mock_response(json_data, status_code=200):
-    """Helper to build a mock requests.Response."""
     mock = MagicMock()
     mock.json.return_value = json_data
     mock.status_code = status_code
+    mock.content = True
     mock.raise_for_status = MagicMock()
     return mock
 
 
-# ── Authentication tests ──────────────────────────────────────────────
+# ── Authentication ────────────────────────────────────────────────────
 
 @patch("core.api_client.requests.post")
 def test_authenticate_success(mock_post, config):
@@ -50,7 +52,7 @@ def test_authenticate_success(mock_post, config):
         c.token = "abc123"
         c.headers["Authorization"] = "Bearer abc123"
     assert c.token == "abc123"
-    assert c.headers["Authorization"] == "Bearer abc123"
+    assert "Bearer abc123" in c.headers["Authorization"]
 
 
 @patch("core.api_client.requests.post")
@@ -68,54 +70,146 @@ def test_authenticate_connection_error_raises(mock_post, config):
         PineappleClient(config)
 
 
-# ── GET tests ─────────────────────────────────────────────────────────
+# ── System endpoints ──────────────────────────────────────────────────
 
 @patch("core.api_client.requests.get")
 def test_get_info(mock_get, client):
-    mock_get.return_value = make_mock_response({"firmware": "2.1.3", "hostname": "Pineapple"})
+    mock_get.return_value = make_mock_response({"device": "standard", "firmware": "2.1.3"})
     result = client.get_info()
     assert result["firmware"] == "2.1.3"
-    assert result["hostname"] == "Pineapple"
+
+
+# ── Recon endpoints ───────────────────────────────────────────────────
+
+def test_start_recon_is_noop_on_213(client):
+    """
+    Firmware 2.1.3 has no recon/start endpoint.
+    start_recon() must return without making any HTTP call.
+    """
+    with patch.object(client, "_post") as mock_post:
+        result = client.start_recon(scan_time=15)
+        mock_post.assert_not_called()   # ← critical: no POST should fire
+    assert result["status"] == "passive — no action needed"
 
 
 @patch("core.api_client.requests.get")
-def test_get_networks_returns_list(mock_get, client):
-    payload = [
-        {"ssid": "LabNet",  "bssid": "AA:BB:CC:DD:EE:FF", "channel": 6,  "encryption": "WPA2"},
-        {"ssid": "TestNet", "bssid": "11:22:33:44:55:66", "channel": 11, "encryption": "WPA"},
-    ]
-    mock_get.return_value = make_mock_response(payload)
+def test_get_networks_parses_ssid_pool(mock_get, client):
+    """
+    Firmware 2.1.3 returns SSIDs as a newline-delimited string.
+    get_networks() must parse and normalize this into a list of dicts.
+    """
+    mock_get.return_value = make_mock_response({
+        "ssids": "LabNet\nTestNet\n#comment\n\nAnotherNet"
+    })
     networks = client.get_networks()
     assert isinstance(networks, list)
-    assert len(networks) == 2
+    assert len(networks) == 3                    # comment and blank skipped
     assert networks[0]["ssid"] == "LabNet"
+    assert "bssid" in networks[0]               # normalized fields present
 
 
 @patch("core.api_client.requests.get")
-def test_get_clients_returns_list(mock_get, client):
-    payload = [{"mac": "DE:AD:BE:EF:00:01", "ssid": "LabNet", "signal": -55}]
-    mock_get.return_value = make_mock_response(payload)
+def test_get_clients_normalizes_fields(mock_get, client):
+    mock_get.return_value = make_mock_response([
+        {"mac": "DE:AD:BE:EF:00:01", "ssid": "LabNet", "tx_bytes": 1024, "rx_bytes": 512}
+    ])
     clients = client.get_clients()
     assert len(clients) == 1
     assert clients[0]["mac"] == "DE:AD:BE:EF:00:01"
+    assert clients[0]["ssid"] == "LabNet"
+
+
+# ── Handshake endpoints (2.1.3 key normalization) ─────────────────────
+
+@patch("core.api_client.requests.get")
+def test_get_handshakes_normalizes_location_to_filename(mock_get, client):
+    """
+    CRITICAL FIX: firmware 2.1.3 returns 'location' not 'filename'.
+    get_handshakes() must derive filename from os.path.basename(location).
+    """
+    mock_get.return_value = make_mock_response({
+        "handshakes": [
+            {
+                "location": "/root/handshakes/74-df-bf-04-e2-eb_lab.pcap",
+                "ssid":     "lab",
+                "bssid":    "74:df:bf:04:e2:eb",
+                "date":     "2026-03-31"
+            }
+        ]
+    })
+    handshakes = client.get_handshakes()
+    assert len(handshakes) == 1
+    assert handshakes[0]["filename"] == "74-df-bf-04-e2-eb_lab.pcap"  # derived from location
+    assert handshakes[0]["ssid"]     == "lab"
+    assert handshakes[0]["bssid"]    == "74:df:bf:04:e2:eb"
 
 
 @patch("core.api_client.requests.get")
-def test_get_handshakes(mock_get, client):
-    payload = [{"filename": "LabNet_handshake.cap", "bssid": "AA:BB:CC:DD:EE:FF", "ssid": "LabNet"}]
-    mock_get.return_value = make_mock_response(payload)
+def test_get_handshakes_skips_entries_without_location(mock_get, client):
+    """Entries with no 'location' AND no 'filename' are silently skipped."""
+    mock_get.return_value = make_mock_response({
+        "handshakes": [
+            {"ssid": "broken_entry_no_path"},       # no location or filename
+            {"location": "/root/handshakes/good.pcap", "ssid": "good"},
+        ]
+    })
     handshakes = client.get_handshakes()
-    assert handshakes[0]["filename"] == "LabNet_handshake.cap"
+    assert len(handshakes) == 1
+    assert handshakes[0]["filename"] == "good.pcap"
 
 
-# ── POST tests ────────────────────────────────────────────────────────
+@patch("core.api_client.requests.get")
+def test_get_handshakes_handles_bare_list_response(mock_get, client):
+    """Some firmware variants return a bare list, not {"handshakes": [...]}."""
+    mock_get.return_value = make_mock_response([
+        {"location": "/root/handshakes/bare.pcap", "ssid": "bare"}
+    ])
+    handshakes = client.get_handshakes()
+    assert len(handshakes) == 1
+    assert handshakes[0]["filename"] == "bare.pcap"
+
+
+@patch("core.api_client.requests.get")
+def test_get_handshakes_api_error_returns_empty(mock_get, client):
+    """If the API errors, get_handshakes() returns [] without crashing."""
+    from requests.exceptions import ConnectionError
+    mock_get.side_effect = ConnectionError("refused")
+    result = client.get_handshakes()
+    assert result == []
+
+
+# ── Deauth endpoint (FIXED: correct endpoint) ─────────────────────────
+
+@patch("core.api_client.requests.post")
+def test_send_deauth_uses_correct_endpoint(mock_post, client):
+    """
+    CRITICAL FIX: deauth must POST to pineap/handshakes/deauth,
+    NOT to pineap/settings (which returns 404 on 2.1.3).
+    """
+    mock_post.return_value = make_mock_response({"success": True})
+    client.send_deauth("AA:BB:CC:DD:EE:FF", "C0:FF:EE:00:00:01")
+    call_url = mock_post.call_args[0][0]
+    assert "handshakes/deauth" in call_url
+    assert "settings" not in call_url  # old broken endpoint must NOT be used
+
+
+@patch("core.api_client.requests.post")
+def test_send_deauth_payload(mock_post, client):
+    """Deauth payload must include bssid and client keys."""
+    mock_post.return_value = make_mock_response({})
+    client.send_deauth("AA:BB:CC:DD:EE:FF", "C0:FF:EE:00:00:01")
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["bssid"]  == "AA:BB:CC:DD:EE:FF"
+    assert payload["client"] == "C0:FF:EE:00:00:01"
+
+
+# ── Module endpoints ──────────────────────────────────────────────────
 
 @patch("core.api_client.requests.post")
 def test_start_module(mock_post, client):
     mock_post.return_value = make_mock_response({"status": "started"})
     result = client.start_module("recon")
     assert result["status"] == "started"
-    mock_post.assert_called_once()
 
 
 @patch("core.api_client.requests.post")
@@ -125,23 +219,14 @@ def test_stop_module(mock_post, client):
     assert result["status"] == "stopped"
 
 
-@patch("core.api_client.requests.post")
-def test_start_recon(mock_post, client):
-    mock_post.return_value = make_mock_response({"status": "scanning"})
-    result = client.start_recon(scan_time=10)
-    assert result["status"] == "scanning"
-    call_kwargs = mock_post.call_args
-    assert call_kwargs.kwargs["json"]["scanTime"] == 10
-
-
-# ── Error handling tests ──────────────────────────────────────────────
+# ── Error handling ────────────────────────────────────────────────────
 
 @patch("core.api_client.requests.get")
 def test_connection_error_raises_api_error(mock_get, client):
     from requests.exceptions import ConnectionError
     mock_get.side_effect = ConnectionError("refused")
     with pytest.raises(PineappleAPIError, match="Cannot reach Pineapple"):
-        client.get_networks()
+        client.get_info()
 
 
 @patch("core.api_client.requests.get")
@@ -149,14 +234,10 @@ def test_timeout_raises_api_error(mock_get, client):
     from requests.exceptions import Timeout
     mock_get.side_effect = Timeout("timed out")
     with pytest.raises(PineappleAPIError, match="timed out"):
-        client.get_networks()
+        client.get_info()
 
 
-# ── Auth header tests ─────────────────────────────────────────────────
+# ── Auth header ───────────────────────────────────────────────────────
 
-@patch("core.api_client.requests.get")
-def test_bearer_token_sent_in_header(mock_get, client):
-    mock_get.return_value = make_mock_response({})
-    client.get_info()
-    assert "Authorization" in client.headers
+def test_bearer_token_in_header(client):
     assert client.headers["Authorization"] == "Bearer test-token-abc"

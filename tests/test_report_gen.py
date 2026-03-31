@@ -1,12 +1,12 @@
 """
+test_report_gen.py
+------------------
 Unit tests for ReportGenerator.
-Verifies context building, HTML output, and JSON saving.
 """
 
 import os
 import json
 import pytest
-import tempfile
 from reporting.report_gen import ReportGenerator
 
 
@@ -50,14 +50,12 @@ SAMPLE_DATA = {
 
 @pytest.fixture
 def report_gen(tmp_path):
-    template_dir = str((tmp_path / "templates"))
-    output_dir   = str((tmp_path / "reports"))
-    os.makedirs(template_dir)
-    os.makedirs(output_dir)
+    template_dir = str(tmp_path / "templates")
+    output_dir   = str(tmp_path / "reports")
+    os.makedirs(template_dir, exist_ok=True)
+    os.makedirs(output_dir,   exist_ok=True)
 
-    # Write a minimal template
-    template_path = os.path.join(template_dir, "report.html")
-    with open(template_path, "w") as f:
+    with open(os.path.join(template_dir, "report.html"), "w") as f:
         f.write("""<!DOCTYPE html><html><body>
 <p>Networks: {{ network_count }}</p>
 <p>Clients: {{ client_count }}</p>
@@ -85,9 +83,9 @@ def test_build_context_handshake_flag(report_gen):
 
 def test_build_context_defaults_for_missing_data(report_gen):
     ctx = report_gen._build_context({})
-    assert ctx["network_count"]  == 0
-    assert ctx["client_count"]   == 0
-    assert ctx["capture_count"]  == 0
+    assert ctx["network_count"]   == 0
+    assert ctx["client_count"]    == 0
+    assert ctx["capture_count"]   == 0
     assert ctx["handshake_found"] is False
 
 
@@ -101,16 +99,17 @@ def test_generate_html_creates_file(report_gen):
 
 def test_generate_html_contains_data(report_gen):
     path = report_gen.generate_html(SAMPLE_DATA, filename="test_report2")
-    with open(path) as f:
-        content = f.read()
-    assert "2" in content          # network count
-    assert "True" in content       # handshake found
+    content = open(path).read()
+    assert "2" in content       # network count
+    assert "True" in content    # handshake found
 
 
 def test_generate_html_missing_template_raises(tmp_path):
-    rg = ReportGenerator(template_dir=str(tmp_path / "empty"), output_dir=str(tmp_path / "out"))
-    os.makedirs(str(tmp_path / "empty"))
-    os.makedirs(str(tmp_path / "out"))
+    empty_dir = str(tmp_path / "empty_templates")
+    out_dir   = str(tmp_path / "out")
+    os.makedirs(empty_dir, exist_ok=True)
+    os.makedirs(out_dir,   exist_ok=True)
+    rg = ReportGenerator(template_dir=empty_dir, output_dir=out_dir)
     with pytest.raises(FileNotFoundError):
         rg.generate_html(SAMPLE_DATA)
 
@@ -120,6 +119,5 @@ def test_generate_html_missing_template_raises(tmp_path):
 def test_save_json_creates_file(report_gen):
     path = report_gen.save_json(SAMPLE_DATA, filename="test_results")
     assert os.path.exists(path)
-    with open(path) as f:
-        data = json.load(f)
+    data = json.load(open(path))
     assert data["tester"] == "Test Student"

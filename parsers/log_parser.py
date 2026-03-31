@@ -1,4 +1,6 @@
 """
+log_parser.py
+-------------
 Normalizes raw Pineapple log files (which can be inconsistent/messy)
 into clean JSON structures for analysis and reporting.
 
@@ -24,7 +26,6 @@ class LogParser:
     module logs, recon logs, and system event logs.
     """
 
-    # Named regex patterns for common fields
     PATTERNS = {
         "timestamp": r"(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})",
         "level":     r"\[(INFO|WARN(?:ING)?|ERROR|DEBUG|CRITICAL)\]",
@@ -40,13 +41,7 @@ class LogParser:
     def parse_line(self, line: str) -> dict:
         """
         Parse a single log line into a structured dict.
-        Unmatched fields will be None. Raw line always preserved.
-
-        Args:
-            line: Single line string from a log file.
-
-        Returns:
-            Dict with extracted fields + raw line.
+        Unmatched fields are None. Raw line always preserved.
         """
         entry = {"raw": line}
         for field, pattern in self.PATTERNS.items():
@@ -55,15 +50,7 @@ class LogParser:
         return entry
 
     def parse_file(self, filepath: str) -> list[dict]:
-        """
-        Parse all lines from a log file.
-
-        Args:
-            filepath: Path to the log file.
-
-        Returns:
-            List of parsed entry dicts.
-        """
+        """Parse all non-blank lines from a log file."""
         path = Path(filepath)
         if not path.exists():
             logger.warning(f"Log file not found: {filepath}")
@@ -83,31 +70,27 @@ class LogParser:
         return entries
 
     def normalize_to_json(self, input_path: str, output_path: str) -> list[dict]:
-        """
-        Parse a log file and write the result to a JSON file.
-
-        Args:
-            input_path:  Path to raw log file.
-            output_path: Path for output JSON file.
-
-        Returns:
-            List of parsed entries (same as parse_file).
-        """
+        """Parse a log file and write the result as JSON."""
         entries = self.parse_file(input_path)
-
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(entries, f, indent=2)
-
         logger.info(f"Normalized log saved to {output_path} ({len(entries)} entries)")
         return entries
 
     def filter_by_level(self, entries: list[dict], level: str) -> list[dict]:
-        """Filter parsed entries by log level (INFO, ERROR, WARN, etc.)."""
-        return [e for e in entries if e.get("level", "").upper() == level.upper()]
+        """
+        Filter parsed entries by log level (INFO, ERROR, WARN, etc.).
+        Safely handles entries where 'level' is None.
+        """
+        target = level.upper()
+        return [
+            e for e in entries
+            if e.get("level") is not None and e["level"].upper() == target
+        ]
 
     def filter_by_mac(self, entries: list[dict], mac: str) -> list[dict]:
-        """Filter parsed entries referencing a specific MAC address."""
+        """Filter entries referencing a specific MAC address."""
         return [e for e in entries if e.get("mac") == mac.upper()]
 
     def get_unique_macs(self, entries: list[dict]) -> list[str]:
