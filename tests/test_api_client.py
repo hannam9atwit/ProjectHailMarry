@@ -180,27 +180,17 @@ def test_get_handshakes_api_error_returns_empty(mock_get, client):
 
 # ── Deauth endpoint (FIXED: correct endpoint) ─────────────────────────
 
-@patch("core.api_client.requests.post")
-def test_send_deauth_uses_correct_endpoint(mock_post, client):
+def test_send_deauth_is_noop_on_213(client):
     """
-    CRITICAL FIX: deauth must POST to pineap/handshakes/deauth,
-    NOT to pineap/settings (which returns 404 on 2.1.3).
+    Firmware 2.1.3 has NO deauth API endpoint.
+    send_deauth() must return gracefully without making any HTTP call.
+    Deauth is handled by Evil Twin via the Pineapple web UI.
     """
-    mock_post.return_value = make_mock_response({"success": True})
-    client.send_deauth("AA:BB:CC:DD:EE:FF", "C0:FF:EE:00:00:01")
-    call_url = mock_post.call_args[0][0]
-    assert "handshakes/deauth" in call_url
-    assert "settings" not in call_url  # old broken endpoint must NOT be used
-
-
-@patch("core.api_client.requests.post")
-def test_send_deauth_payload(mock_post, client):
-    """Deauth payload must include bssid and client keys."""
-    mock_post.return_value = make_mock_response({})
-    client.send_deauth("AA:BB:CC:DD:EE:FF", "C0:FF:EE:00:00:01")
-    payload = mock_post.call_args.kwargs["json"]
-    assert payload["bssid"]  == "AA:BB:CC:DD:EE:FF"
-    assert payload["client"] == "C0:FF:EE:00:00:01"
+    with patch.object(client, "_post") as mock_post:
+        result = client.send_deauth("AA:BB:CC:DD:EE:FF")
+        mock_post.assert_not_called()
+    assert result["status"] == "no_deauth_endpoint"
+    assert result["bssid"]  == "AA:BB:CC:DD:EE:FF"
 
 
 # ── Module endpoints ──────────────────────────────────────────────────
@@ -233,7 +223,7 @@ def test_connection_error_raises_api_error(mock_get, client):
 def test_timeout_raises_api_error(mock_get, client):
     from requests.exceptions import Timeout
     mock_get.side_effect = Timeout("timed out")
-    with pytest.raises(PineappleAPIError, match="timed out"):
+    with pytest.raises(PineappleAPIError, match="Timed out"):
         client.get_info()
 
 
