@@ -170,11 +170,21 @@ class PineappleClient:
 
     def get_networks(self) -> list:
         """
-        GET /api/pineap/ssids
-        Returns {"ssids": "SSID1\nSSID2\n#comment\n..."}
-        Normalizes into list of dicts for the report.
+        Try to get full network details (SSID, BSSID, channel, signal,
+        encryption) by querying the recon SQLite DB on the device via SSH.
+        Falls back to the SSID name pool if SSH/sqlite3 is unavailable.
         """
-        logger.info("Fetching SSID pool from PineAP (recon equivalent)")
+        logger.info("Querying recon.db for full network details")
+        try:
+            networks = self._query_recon_db()
+            if networks:
+                logger.info(f"Got {len(networks)} networks with full details from recon.db")
+                return networks
+        except Exception as e:
+            logger.warning(f"recon.db query failed ({e}) — falling back to SSID pool")
+
+        # Fallback: SSID pool names only
+        logger.info("Fetching SSID pool from PineAP (names only fallback)")
         try:
             data = self._get("pineap/ssids")
             if not data:
@@ -192,6 +202,61 @@ class PineappleClient:
         except PineappleAPIError as e:
             logger.warning(f"Could not fetch SSID pool: {e}")
             return []
+
+    def _query_recon_db(self) -> list:
+        """
+        SSH into the Pineapple and query /root/recon.db with sqlite3.
+        Returns full network rows with BSSID, channel, signal, encryption.
+
+        Tries two column name variants to handle schema differences
+        across firmware versions.
+        """
+        import subprocess as _sp, shutil as _sh, json as _json
+
+        host     = self.base_url.split("//")[1].split(":")[0]
+        username = getattr(self, "username", "root")
+        password = getattr(self, "password", "")
+
+        if not _sh.which("sshpass"):
+            raise RuntimeError("sshpass not installed — run: sudo apt install sshpass")
+
+        # Try the standard schema first, then alternative column names
+        queries = [
+            "SELECT ssid,bssid,channel,rssi,encryption FROM ssids ORDER BY rssi DESC LIMIT 500",
+            "SELECT ssid,bssid,channel,signal AS rssi,crypto AS encryption FROM ssids ORDER BY signal DESC LIMIT 500",
+            "SELECT ssid,bssid,channel,rssi,crypto AS encryption FROM ssids ORDER BY rssi DESC LIMIT 500",
+        ]
+
+        ssh_prefix = [
+            "sshpass", "-p", password,
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=10",
+            "-o", "BatchMode=no",
+            "-o", "LogLevel=ERROR",
+            f"{username}@{host}",
+        ]
+
+        for q in queries:
+            result = _sp.run(
+                ssh_prefix + [f"sqlite3 -json /root/recon.db '{q}'"],
+                capture_output=True, text=True, timeout=20
+            )
+            stdout = result.stdout.strip()
+            if result.returncode == 0 and stdout and stdout.startswith("["):
+                rows = _json.loads(stdout)
+                return [
+                    {
+                        "ssid":       r.get("ssid", "—") or "—",
+                        "bssid":      r.get("bssid", "—") or "—",
+                        "channel":    str(r.get("channel", "—") or "—"),
+                        "signal":     str(r.get("rssi",    "—") or "—"),
+                        "encryption": r.get("encryption", "—") or "—",
+                    }
+                    for r in rows if r.get("ssid")
+                ]
+
+        raise RuntimeError("All sqlite3 query variants failed")
 
     def get_clients(self) -> list:
         """
