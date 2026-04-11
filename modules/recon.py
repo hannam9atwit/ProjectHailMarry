@@ -1,4 +1,6 @@
 """
+recon.py
+--------
 Recon module — triggers a scan on the Pineapple, collects
 detected networks and clients, and stores structured results.
 """
@@ -52,9 +54,14 @@ class ReconModule(BaseModule):
         )
 
     def get_results(self) -> dict:
-        return self.results
+        # Always return a dict with list values — never None
+        return {
+            "networks": self.results.get("networks") or [],
+            "clients":  self.results.get("clients")  or [],
+        }
 
     def summary(self) -> str:
-        n = len(self.results.get("networks", []))
-        c = len(self.results.get("clients",  []))
+        r = self.get_results()
+        n = len(r["networks"])
+        c = len(r["clients"])
         return f"ReconModule: {n} network(s), {c} client(s) detected"
