@@ -176,8 +176,10 @@ class PineappleClient:
         """
         logger.info("Fetching SSID pool from PineAP (recon equivalent)")
         try:
-            data  = self._get("pineap/ssids")
-            raw   = data.get("ssids", "")
+            data = self._get("pineap/ssids")
+            if not data:
+                return []
+            raw   = data.get("ssids", "") or ""
             ssids = [
                 s.strip() for s in raw.split("\n")
                 if s.strip() and not s.startswith("#")
@@ -198,8 +200,11 @@ class PineappleClient:
         """
         logger.info("Fetching clients from PineAP")
         try:
-            data    = self._get("pineap/clients")
-            clients = data if isinstance(data, list) else data.get("clients", [])
+            data = self._get("pineap/clients")
+            # API may return None, a bare list, or {"clients": [...]}
+            if not data:
+                return []
+            clients = data if isinstance(data, list) else data.get("clients", []) or []
             return [
                 {
                     "mac":     c.get("mac", "—"),
@@ -207,7 +212,7 @@ class PineappleClient:
                     "signal":  c.get("signal", c.get("tx_bytes", "—")),
                     "packets": c.get("packets", c.get("rx_bytes", "—")),
                 }
-                for c in clients
+                for c in clients if isinstance(c, dict)
             ]
         except PineappleAPIError as e:
             logger.warning(f"Could not fetch clients: {e}")
