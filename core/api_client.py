@@ -2,40 +2,12 @@
 api_client.py
 -------------
 WiFi Pineapple Mark VII REST API client — firmware 2.1.3 confirmed.
-
-Confirmed working endpoints:
-    POST /api/login                  → auth, returns {"token": "..."}
-    GET  /api/device                 → {"device": "standard"}
-    GET  /api/modules                → list of installed modules
-    GET  /api/pineap/settings        → full PineAP config dict
-    POST /api/pineap/settings        → update PineAP config
-    GET  /api/pineap/ssids           → {"ssids": "SSID1\nSSID2\n..."}
-    GET  /api/pineap/clients         → list of client dicts
-    GET  /api/pineap/handshakes      → {"handshakes": [...]}
-    GET  /api/notifications          → notification list
-
-Confirmed NOT available on 2.1.3:
-    - Any deauth REST endpoint (Evil Twin module handles this via web UI)
-    - /recon/*, /system/stats, /system/info
-
-Handshake object structure (from probe):
-    {
-        "file_exists": true,
-        "mac":         "74:df:bf:04:e2:eb",   ← AP MAC, key is 'mac' not 'bssid'
-        "client":      "eviltwin.pcap",         ← original client filename
-        "source":      "Evil WPA/2 Twin",
-        "type":        "eviltwin",
-        "timestamp":   "2025-08-05T01:19:06Z",
-        "extension":   "pcap",
-        "location":    "/root/handshakes/74-df-bf-04-e2-eb_eviltwin.pcap"
-    }
-
-Download URL pattern:
-    GET /api/pineap/handshakes/<basename-of-location>/download
-    e.g. /api/pineap/handshakes/74-df-bf-04-e2-eb_eviltwin.pcap/download
 """
 
 import os
+import sqlite3
+import subprocess
+import tempfile
 import requests
 from requests.exceptions import ConnectionError, Timeout, HTTPError
 from core.config import PineappleConfig
@@ -132,7 +104,6 @@ class PineappleClient:
     # ------------------------------------------------------------------
 
     def get_info(self) -> dict:
-        """GET /api/device"""
         return self._get("device")
 
     # ------------------------------------------------------------------
@@ -154,11 +125,10 @@ class PineappleClient:
         return self._get(f"module/{module_name}/log")
 
     # ------------------------------------------------------------------
-    # Recon (passive only on 2.1.3)
+    # Recon
     # ------------------------------------------------------------------
 
     def start_recon(self, scan_time: int = 15) -> dict:
-        """No-op on 2.1.3 — PineAP captures SSIDs passively."""
         logger.warning(
             "start_recon() called but firmware 2.1.3 has no recon/start endpoint. "
             "PineAP captures SSIDs passively — ensure PineAP is enabled in the web UI."
@@ -170,32 +140,30 @@ class PineappleClient:
 
     def get_networks(self) -> list:
         """
-        Try three approaches in order, returning the richest result available:
+        Fetch networks using three approaches, best-to-worst:
 
-        1. SSH → sqlite3 recon.db  (full: SSID, BSSID, channel, signal, encryption)
-        2. /api/pineap/clients     (partial: cross-reference BSSID + signal)
-        3. /api/pineap/ssids       (names only — last resort)
-
-        FIX: The original code fell back to names-only whenever SSH failed,
-        leaving BSSID/channel/signal/encryption blank in the report.
-        This version adds a client-enrichment step between SSH and names-only.
+        1. SCP recon.db locally then query with Python's built-in sqlite3.
+           This fixes the 'ash: sqlite3: not found' error on firmware 2.1.3
+           — we bring the database to our machine instead of running sqlite3
+           remotely on the Pineapple.
+        2. /api/pineap/clients cross-reference (if clients are associated).
+        3. /api/pineap/ssids name pool only (last resort, names only).
         """
-        # ── Attempt 1: SSH recon.db ───────────────────────────────────
-        logger.info("Attempting recon.db query via SSH...")
+
+        # ── Attempt 1: SCP recon.db → local Python sqlite3 ───────────
+        logger.info("Attempting to SCP recon.db for local parsing...")
         try:
-            networks = self._query_recon_db()
+            networks = self._query_recon_db_via_scp()
             if networks:
-                logger.info(f"recon.db: got {len(networks)} network(s) with full details")
+                logger.info(f"recon.db (local parse): {len(networks)} network(s) with full details")
                 return networks
             else:
-                logger.warning("recon.db query returned 0 rows")
+                logger.warning("recon.db returned 0 rows — DB may not be populated yet")
         except Exception as e:
-            logger.warning(f"recon.db SSH query failed: {e}")
+            logger.warning(f"recon.db SCP failed: {e}")
 
         # ── Attempt 2: enrich from /api/pineap/clients ────────────────
-        # The clients endpoint on 2.1.3 includes bssid/signal per entry,
-        # letting us build a richer network list than SSIDs alone.
-        logger.info("Falling back: enriching network list from /api/pineap/clients...")
+        logger.info("Falling back: enriching from /api/pineap/clients...")
         try:
             client_data = self._get("pineap/clients")
             clients = (
@@ -203,7 +171,6 @@ class PineappleClient:
                 else (client_data or {}).get("clients", []) or []
             )
 
-            # Build ssid → best-signal network entry map
             ssid_map: dict[str, dict] = {}
             for c in clients:
                 if not isinstance(c, dict):
@@ -211,8 +178,6 @@ class PineappleClient:
                 ssid = c.get("ssid") or c.get("ap_ssid") or ""
                 if not ssid:
                     continue
-
-                # Normalise signal to int for comparison
                 raw_sig = c.get("signal", c.get("rssi", "—"))
                 try:
                     sig_int = int(str(raw_sig).replace("dBm", "").strip())
@@ -220,55 +185,43 @@ class PineappleClient:
                 except (ValueError, TypeError):
                     sig_int = -999
                     sig_str = "—"
-
                 existing = ssid_map.get(ssid)
                 if existing is None or sig_int > existing.get("_sig", -999):
                     ssid_map[ssid] = {
                         "ssid":       ssid,
-                        "bssid":      (c.get("bssid") or c.get("ap_bssid") or "—"),
+                        "bssid":      c.get("bssid") or c.get("ap_bssid") or "—",
                         "channel":    str(c.get("channel", "—") or "—"),
                         "signal":     sig_str,
-                        "encryption": (c.get("encryption") or c.get("auth") or "—"),
+                        "encryption": c.get("encryption") or c.get("auth") or "—",
                         "_sig":       sig_int,
                     }
 
             if ssid_map:
-                # Strip internal sort key before returning
                 networks = [
-                    {k: v for k, v in entry.items() if k != "_sig"}
-                    for entry in ssid_map.values()
+                    {k: v for k, v in e.items() if k != "_sig"}
+                    for e in ssid_map.values()
                 ]
-
-                # Overlay any extra SSIDs from the SSID pool not seen in clients
                 try:
                     pool_data = self._get("pineap/ssids")
                     raw = (pool_data or {}).get("ssids", "") or ""
-                    pool_ssids = [
-                        s.strip() for s in raw.split("\n")
-                        if s.strip() and not s.startswith("#")
-                    ]
-                    for ssid in pool_ssids:
-                        if ssid not in ssid_map:
+                    for s in raw.split("\n"):
+                        s = s.strip()
+                        if s and not s.startswith("#") and s not in ssid_map:
                             networks.append({
-                                "ssid": ssid, "bssid": "—",
+                                "ssid": s, "bssid": "—",
                                 "channel": "—", "signal": "—", "encryption": "—",
                             })
                 except Exception:
-                    pass  # pool overlay is best-effort
-
-                logger.info(
-                    f"Client enrichment: {len(networks)} network(s) "
-                    f"({len(ssid_map)} with BSSID/signal data)"
-                )
+                    pass
+                logger.info(f"Client enrichment: {len(networks)} network(s)")
                 return networks
-
         except Exception as e:
             logger.warning(f"Client enrichment failed: {e}")
 
-        # ── Attempt 3: SSID names only (last resort) ──────────────────
-        logger.info("Last resort: fetching SSID name pool only...")
+        # ── Attempt 3: SSID name pool only ────────────────────────────
+        logger.info("Last resort: SSID name pool only...")
         try:
-            data = self._get("pineap/ssids")
+            data  = self._get("pineap/ssids")
             raw   = (data or {}).get("ssids", "") or ""
             ssids = [
                 s.strip() for s in raw.split("\n")
@@ -277,8 +230,7 @@ class PineappleClient:
             logger.warning(
                 f"Only SSID names available ({len(ssids)} SSIDs). "
                 "BSSID/channel/signal/encryption will show '—'. "
-                "For full data ensure SSH is enabled on the Pineapple and "
-                "sshpass is installed (sudo apt install sshpass)."
+                "Ensure SSH is reachable and sshpass is installed."
             )
             return [
                 {"ssid": s, "bssid": "—", "channel": "—",
@@ -289,98 +241,123 @@ class PineappleClient:
             logger.warning(f"Could not fetch SSID pool: {e}")
             return []
 
-    def _query_recon_db(self) -> list:
+    def _query_recon_db_via_scp(self) -> list:
         """
-        SSH into the Pineapple and query /root/recon.db with sqlite3.
-        Returns full network rows with BSSID, channel, signal, encryption.
+        SCP /root/recon.db from the Pineapple to a local temp file,
+        then query it with Python's built-in sqlite3 module.
 
-        Improved: raises a descriptive RuntimeError on failure instead of
-        silently returning [], so get_networks() can log the real reason.
+        The Pineapple runs BusyBox ash and does not have sqlite3 installed,
+        so we copy the database file to our Kali machine and query it here.
         """
-        import subprocess as _sp, shutil as _sh, json as _json
-
+        import shutil
         host     = self.base_url.split("//")[1].split(":")[0]
         username = self.username
         password = self.password
 
-        if not _sh.which("sshpass"):
+        if not shutil.which("sshpass"):
             raise RuntimeError(
-                "sshpass not installed — run: sudo apt install sshpass. "
-                "Without it, SSH-based recon.db queries are unavailable."
+                "sshpass not installed — run: sudo apt install sshpass"
             )
 
-        # Try multiple column-name variants to handle schema differences
-        queries = [
-            "SELECT ssid,bssid,channel,rssi,encryption FROM ssids ORDER BY rssi DESC LIMIT 500",
-            "SELECT ssid,bssid,channel,rssi,crypto AS encryption FROM ssids ORDER BY rssi DESC LIMIT 500",
-            "SELECT ssid,bssid,channel,signal AS rssi,crypto AS encryption FROM ssids ORDER BY signal DESC LIMIT 500",
-            "SELECT ssid,bssid,channel,rssi,encryption FROM networks ORDER BY rssi DESC LIMIT 500",
-        ]
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(tmp_fd)
 
-        ssh_prefix = [
-            "sshpass", "-p", password,
-            "ssh",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "ConnectTimeout=10",
-            "-o", "BatchMode=no",
-            "-o", "LogLevel=ERROR",
-            f"{username}@{host}",
-        ]
+        try:
+            result = subprocess.run(
+                [
+                    "sshpass", "-p", password,
+                    "scp",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "ConnectTimeout=10",
+                    "-o", "LogLevel=ERROR",
+                    f"{username}@{host}:/root/recon.db",
+                    tmp_path,
+                ],
+                capture_output=True, text=True, timeout=30
+            )
 
-        last_error = "no queries attempted"
-        for q in queries:
-            try:
-                result = _sp.run(
-                    ssh_prefix + [f"sqlite3 -json /root/recon.db '{q}'"],
-                    capture_output=True, text=True, timeout=20
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"SCP failed (exit {result.returncode}): "
+                    f"{result.stderr.strip() or 'unknown error'}"
                 )
-                stdout = result.stdout.strip()
-                stderr = result.stderr.strip()
 
-                if result.returncode != 0:
-                    last_error = stderr or f"exit code {result.returncode}"
-                    continue
+            if os.path.getsize(tmp_path) == 0:
+                raise RuntimeError("SCP succeeded but recon.db is empty (0 bytes)")
 
-                if not stdout:
-                    last_error = "empty result (DB not populated yet or table empty)"
-                    continue
+            return self._parse_recon_db_local(tmp_path)
 
-                if not stdout.startswith("["):
-                    last_error = f"unexpected output: {stdout[:80]}"
-                    continue
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
-                rows = _json.loads(stdout)
-                return [
-                    {
-                        "ssid":       r.get("ssid", "—") or "—",
-                        "bssid":      r.get("bssid", "—") or "—",
-                        "channel":    str(r.get("channel", "—") or "—"),
-                        "signal":     str(r.get("rssi",    "—") or "—"),
-                        "encryption": r.get("encryption", "—") or "—",
-                    }
-                    for r in rows if r.get("ssid")
-                ]
+    def _parse_recon_db_local(self, db_path: str) -> list:
+        """
+        Open a local copy of recon.db with Python's sqlite3 and extract
+        network rows. Auto-discovers the table schema so it works across
+        firmware versions with different column names.
+        """
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
 
-            except _sp.TimeoutExpired:
-                last_error = "SSH connection timed out"
-            except Exception as e:
-                last_error = str(e)
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cur.fetchall()]
+        logger.info(f"recon.db tables found: {tables}")
 
-        raise RuntimeError(
-            f"All recon.db query variants failed. Last error: {last_error}\n"
-            "Check: 1) SSH enabled on Pineapple  2) correct password in config.yaml  "
-            "3) recon has run long enough to populate the DB."
-        )
+        results = []
+        for table in tables:
+            cur.execute(f"PRAGMA table_info({table})")
+            cols = {row[1].lower() for row in cur.fetchall()}
+            logger.info(f"  Table '{table}' columns: {cols}")
+
+            # Must have at least ssid + bssid to be useful
+            if "ssid" not in cols or "bssid" not in cols:
+                continue
+
+            sig_col  = next((c for c in ("rssi", "signal", "level") if c in cols), None)
+            enc_col  = next((c for c in ("encryption", "crypto", "enc", "auth") if c in cols), None)
+            chan_col = next((c for c in ("channel", "chan", "freq") if c in cols), None)
+
+            select_parts = [
+                "ssid AS ssid",
+                "bssid AS bssid",
+                f"{chan_col} AS channel"    if chan_col else "NULL AS channel",
+                f"{sig_col} AS signal"      if sig_col  else "NULL AS signal",
+                f"{enc_col} AS encryption"  if enc_col  else "NULL AS encryption",
+            ]
+            order = f"ORDER BY {sig_col} DESC" if sig_col else ""
+
+            try:
+                cur.execute(
+                    f"SELECT {', '.join(select_parts)} FROM {table} {order} LIMIT 1000"
+                )
+                rows = cur.fetchall()
+                if rows:
+                    logger.info(f"  Got {len(rows)} rows from table '{table}'")
+                    results = [
+                        {
+                            "ssid":       str(r["ssid"]       or "—"),
+                            "bssid":      str(r["bssid"]      or "—"),
+                            "channel":    str(r["channel"]    or "—"),
+                            "signal":     str(r["signal"]     or "—"),
+                            "encryption": str(r["encryption"] or "—"),
+                        }
+                        for r in rows if r["ssid"]
+                    ]
+                    break  # first table with data wins
+            except sqlite3.Error as e:
+                logger.warning(f"  Query on table '{table}' failed: {e}")
+
+        conn.close()
+        return results
 
     def get_clients(self) -> list:
-        """
-        GET /api/pineap/clients
-        Returns list of client dicts. Normalizes field names.
-        """
         logger.info("Fetching clients from PineAP")
         try:
             data = self._get("pineap/clients")
-            # API may return None, a bare list, or {"clients": [...]}
             if not data:
                 return []
             clients = data if isinstance(data, list) else data.get("clients", []) or []
@@ -424,11 +401,6 @@ class PineappleClient:
     # ------------------------------------------------------------------
 
     def get_handshakes(self) -> list:
-        """
-        GET /api/pineap/handshakes
-        Normalizes all objects to have consistent 'filename' and 'bssid' keys.
-        On 2.1.3 the AP MAC is in 'mac', not 'bssid'.
-        """
         try:
             data = self._get("pineap/handshakes")
         except PineappleAPIError as e:
@@ -445,17 +417,14 @@ class PineappleClient:
             if not isinstance(h, dict):
                 continue
             if not h.get("file_exists", True):
-                continue  # skip deleted captures
-
+                continue
             location = h.get("location", "")
             filename = os.path.basename(location) if location else ""
             if not filename:
                 continue
-
             normalized.append({
                 "filename":  filename,
                 "location":  location,
-                # 2.1.3 uses 'mac' for the AP MAC — normalize to 'bssid' for report
                 "bssid":     h.get("mac", h.get("bssid", "")),
                 "ssid":      h.get("client", h.get("ssid", "")),
                 "source":    h.get("source", ""),
@@ -468,10 +437,6 @@ class PineappleClient:
         return normalized
 
     def download_handshake(self, filename: str, dest_path: str):
-        """
-        GET /api/pineap/handshakes/<filename>/download
-        Streams the file to dest_path.
-        """
         url = f"{self.base_url}/pineap/handshakes/{filename}/download"
         logger.info(f"Downloading: {filename} → {dest_path}")
         try:
@@ -490,10 +455,6 @@ class PineappleClient:
             )
 
     def send_deauth(self, bssid: str, client_mac: str = "FF:FF:FF:FF:FF:FF") -> dict:
-        """
-        Firmware 2.1.3 has NO deauth REST endpoint.
-        Deauth is handled by the Evil Twin module via the web UI.
-        """
         logger.warning(
             f"send_deauth() called (BSSID={bssid}) — "
             "firmware 2.1.3 has no deauth API endpoint. "
