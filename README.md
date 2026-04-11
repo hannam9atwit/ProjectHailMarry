@@ -44,7 +44,7 @@ pineapple_suite/
 
 ### 1. Clone and create virtual environment
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/hannam9atwit/ProjectHailMarry/
 cd pineapple_suite
 python3 -m venv venv
 source venv/bin/activate
